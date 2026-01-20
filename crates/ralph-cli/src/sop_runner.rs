@@ -138,7 +138,7 @@ fn resolve_backend(
 /// Validates a backend name.
 fn validate_backend_name(name: &str) -> Result<(), SopRunError> {
     match name {
-        "claude" | "kiro" | "gemini" | "codex" | "amp" => Ok(()),
+        "claude" | "kiro" | "gemini" | "codex" | "amp" | "copilot" | "opencode" => Ok(()),
         _ => Err(SopRunError::UnknownBackend(name.to_string())),
     }
 }
@@ -250,6 +250,8 @@ mod tests {
         assert!(validate_backend_name("gemini").is_ok());
         assert!(validate_backend_name("codex").is_ok());
         assert!(validate_backend_name("amp").is_ok());
+        assert!(validate_backend_name("copilot").is_ok());
+        assert!(validate_backend_name("opencode").is_ok());
     }
 
     #[test]

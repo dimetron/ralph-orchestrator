@@ -226,7 +226,20 @@ impl App {
                     let content_area = chunks[1];
                     viewport_height = content_area.height as usize;
 
-                    let state = self.state.lock().unwrap();
+                    let mut state = self.state.lock().unwrap();
+
+                    // Autoscroll: if user is at/near the bottom, keep them at the bottom
+                    // as new content arrives. This mimics standard terminal behavior.
+                    if let Some(buffer) = state.current_iteration_mut() {
+                        let line_count = buffer.line_count();
+                        let max_scroll = line_count.saturating_sub(viewport_height);
+                        // If scroll is at or past where bottom would be, follow new content
+                        if buffer.scroll_offset >= max_scroll.saturating_sub(1) {
+                            buffer.scroll_offset = max_scroll;
+                        }
+                    }
+
+                    let state = state; // Rebind as immutable for rendering
                     terminal.draw(|f| {
                         // Render header
                         f.render_widget(header::render(&state, chunks[0].width), chunks[0]);

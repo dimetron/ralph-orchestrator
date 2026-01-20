@@ -283,28 +283,41 @@ fn text_to_lines(text: &str) -> Vec<Line<'static>> {
 ///
 /// Uses `tui_markdown` to parse markdown and produce properly styled
 /// Lines with bold, italic, code, and header formatting.
+///
+/// **Important:** Standard markdown treats single newlines as soft breaks
+/// (converting them to spaces). This function splits on newlines first
+/// to preserve line boundaries from streaming CLI output.
 fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
     if text.is_empty() {
         return Vec::new();
     }
 
-    // Parse markdown using tui-markdown
-    let parsed_text = tui_markdown::from_str(text);
+    let mut result = Vec::new();
 
-    // Convert Text to owned Lines
-    parsed_text
-        .lines
-        .into_iter()
-        .map(|line| {
-            // Convert each span to owned
+    // Split text by newlines to preserve line boundaries
+    // Then parse each line as markdown individually
+    for line_text in text.split('\n') {
+        if line_text.is_empty() {
+            // Preserve empty lines
+            result.push(Line::from(""));
+            continue;
+        }
+
+        // Parse this line as markdown
+        let parsed_text = tui_markdown::from_str(line_text);
+
+        // Convert Text to owned Lines (usually just one line per input)
+        for line in parsed_text.lines {
             let owned_spans: Vec<Span<'static>> = line
                 .spans
                 .into_iter()
                 .map(|span| Span::styled(span.content.into_owned(), span.style))
                 .collect();
-            Line::from(owned_spans)
-        })
-        .collect()
+            result.push(Line::from(owned_spans));
+        }
+    }
+
+    result
 }
 
 /// Renders streaming output as ratatui Lines for TUI display.
@@ -686,10 +699,15 @@ mod tests {
             // When on_text("hello\n") is called
             handler.on_text("hello\n");
 
-            // Then a Line with "hello" content is produced
+            // Then a Line with "hello" content is produced (trailing newline creates empty line)
             let lines = collect_lines(&handler);
-            assert_eq!(lines.len(), 1);
+            assert_eq!(lines.len(), 2, "trailing newline creates an empty line");
             assert_eq!(lines[0].to_string(), "hello");
+            assert_eq!(
+                lines[1].to_string(),
+                "",
+                "trailing newline should create empty line"
+            );
         }
 
         #[test]
@@ -830,7 +848,7 @@ mod tests {
 
             // Then line is truncated and ends with "..." and is UTF-8 safe
             let lines = collect_lines(&handler);
-            assert_eq!(lines.len(), 1);
+            assert_eq!(lines.len(), 2, "trailing newline creates an empty line");
             let line_text = lines[0].to_string();
 
             // Should be truncated (default 200 chars for display)
