@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TUI Artifacts**: Fixed viewport buffer clearing to prevent visual artifacts when switching iterations
 - **Markdown Boundaries**: Preserved line boundaries when rendering markdown content
 - **Backend Support**: Added `opencode` and `copilot` to valid backends for `ralph init` (#75, #77)
+- **Interrupt Handling**: Fixed Ctrl+C race condition where process continued executing after interrupt (#76)
 
 ## [2.0.0] - 2026-01-14
 
