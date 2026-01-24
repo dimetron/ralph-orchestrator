@@ -184,7 +184,14 @@ fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        // Note: `max_len` is a byte-count upper bound.
+        // We must back off to a valid UTF-8 character boundary; otherwise slicing `&s[..N]` can
+        // panic when the output contains multi-byte characters (e.g. CJK, emoji).
+        let mut boundary = max_len.min(s.len());
+        while boundary > 0 && !s.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        format!("{}...", &s[..boundary])
     }
 }
 
@@ -194,6 +201,13 @@ mod tests {
     use std::env;
     use std::fs;
     use std::time::Duration;
+
+    #[test]
+    fn test_truncate_does_not_panic_on_multibyte_chars() {
+        let s = format!("{}✅{}", "x".repeat(99), "y".repeat(10));
+        let out = truncate(&s, 100);
+        for _ in out.chars() {}
+    }
 
     fn test_workspace(test_name: &str) -> std::path::PathBuf {
         env::temp_dir().join(format!(

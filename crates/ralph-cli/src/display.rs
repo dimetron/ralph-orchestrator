@@ -94,11 +94,39 @@ pub fn format_elapsed(d: Duration) -> String {
 
 /// Truncates a string to max_len characters, adding ellipsis if truncated.
 pub fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len - 1])
+    // Note: `max_len` keeps the legacy behavior (byte-count-ish), but we must slice only on a
+    // valid UTF-8 character boundary. Otherwise, multi-byte characters (e.g. CJK, emoji) can make
+    // `&s[..N]` panic.
+    if max_len == 0 {
+        return String::new();
     }
+
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+
+    truncate_prefix_bytes(s, max_len.saturating_sub(1))
+}
+
+/// Truncates the string to at most `prefix_max_bytes` bytes (as close as possible) and appends "...".
+///
+/// Key point: always use `char_indices()` to find a valid UTF-8 boundary before slicing, so we
+/// never slice through a multi-byte character and panic.
+fn truncate_prefix_bytes(s: &str, prefix_max_bytes: usize) -> String {
+    if s.len() <= prefix_max_bytes {
+        return s.to_string();
+    }
+
+    // Find the last character start before `prefix_max_bytes`, then add its byte length to get a
+    // valid boundary.
+    let boundary = s
+        .char_indices()
+        .take_while(|(i, _)| *i < prefix_max_bytes)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+
+    format!("{}...", &s[..boundary])
 }
 
 /// Prints termination message with status.
@@ -200,10 +228,11 @@ pub fn print_events_table(records: &[EventRecord], use_colors: bool) {
     for (i, record) in records.iter().enumerate() {
         let topic_color = get_topic_color(&record.topic);
         let triggered = record.triggered.as_deref().unwrap_or("-");
-        let payload_preview = if record.payload.len() > 40 {
-            format!("{}...", &record.payload[..40].replace('\n', " "))
+        let payload_one_line = record.payload.replace('\n', " ");
+        let payload_preview = if payload_one_line.len() > 40 {
+            truncate_prefix_bytes(&payload_one_line, 40)
         } else {
-            record.payload.replace('\n', " ")
+            payload_one_line
         };
 
         // Extract time portion (HH:MM:SS) from ISO 8601 timestamp
@@ -217,8 +246,14 @@ pub fn print_events_table(records: &[EventRecord], use_colors: bool) {
                     .find(|c| c == 'Z' || c == '+' || c == '-')
                     .unwrap_or(after_t.len());
                 let time_str = &after_t[..end];
-                // Take only HH:MM:SS (first 8 chars if available)
-                Some(&time_str[..time_str.len().min(8)])
+                // Take only HH:MM:SS (usually ASCII), but still ensure we slice on a valid UTF-8
+                // boundary for robustness. Otherwise, an unexpected `ts` (e.g. CJK/emoji) can make
+                // `&s[..N]` panic.
+                let mut boundary = time_str.len().min(8);
+                while boundary > 0 && !time_str.is_char_boundary(boundary) {
+                    boundary -= 1;
+                }
+                Some(&time_str[..boundary])
             })
             .unwrap_or("-");
 
@@ -309,6 +344,54 @@ mod tests {
     #[test]
     fn test_truncate_long_string() {
         assert_eq!(truncate("hello world", 8), "hello w...");
+    }
+
+    #[test]
+    fn test_truncate_does_not_panic_on_multibyte_chars() {
+        // Let a multi-byte character straddle the truncation boundary. The old implementation
+        // would panic because `&s[..N]` was not on a UTF-8 boundary.
+        let s = format!("{}✅{}", "x".repeat(39), "y".repeat(10));
+
+        let out = truncate(&s, 40);
+
+        // Verify output is valid UTF-8 (iterating `chars()` should not panic).
+        for _ in out.chars() {}
+        assert!(out.ends_with("..."));
+    }
+
+    #[test]
+    fn test_print_events_table_does_not_panic_on_multibyte_payload() {
+        // Trigger the `payload_preview` truncation path (>40 bytes) and place an emoji near the
+        // boundary.
+        let payload = format!("{}✅{}", "x".repeat(39), "y".repeat(10));
+        let record = EventRecord {
+            ts: "2026-01-23T00:00:00Z".to_string(),
+            iteration: 1,
+            hat: "hat".to_string(),
+            topic: "task.start".to_string(),
+            triggered: None,
+            payload,
+            blocked_count: None,
+        };
+
+        print_events_table(&[record], false);
+    }
+
+    #[test]
+    fn test_print_events_table_does_not_panic_on_multibyte_ts() {
+        // Make a multi-byte character land on the "take the first 8 bytes" boundary. The old
+        // implementation would panic because `&time_str[..8]` was not a UTF-8 boundary.
+        let record = EventRecord {
+            ts: "2026-01-23Txxxxxxx✅Z".to_string(),
+            iteration: 1,
+            hat: "hat".to_string(),
+            topic: "task.start".to_string(),
+            triggered: None,
+            payload: "ok".to_string(),
+            blocked_count: None,
+        };
+
+        print_events_table(&[record], false);
     }
 
     #[test]
