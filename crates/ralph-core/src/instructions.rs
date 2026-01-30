@@ -22,8 +22,7 @@ pub struct InstructionBuilder {
 
 impl InstructionBuilder {
     /// Creates a new instruction builder with core configuration.
-    #[allow(unused_variables)]
-    pub fn new(completion_promise: impl Into<String>, core: CoreConfig) -> Self {
+    pub fn new(core: CoreConfig) -> Self {
         Self {
             core,
             events: HashMap::new(),
@@ -31,12 +30,7 @@ impl InstructionBuilder {
     }
 
     /// Creates a new instruction builder with event metadata for custom hats.
-    #[allow(unused_variables)]
-    pub fn with_events(
-        completion_promise: impl Into<String>,
-        core: CoreConfig,
-        events: HashMap<String, EventMetadata>,
-    ) -> Self {
+    pub fn with_events(core: CoreConfig, events: HashMap<String, EventMetadata>) -> Self {
         Self { core, events }
     }
 
@@ -214,13 +208,13 @@ You MUST handle these events:
 mod tests {
     use super::*;
 
-    fn default_builder(promise: &str) -> InstructionBuilder {
-        InstructionBuilder::new(promise, CoreConfig::default())
+    fn default_builder() -> InstructionBuilder {
+        InstructionBuilder::new(CoreConfig::default())
     }
 
     #[test]
     fn test_custom_hat_with_rfc2119_patterns() {
-        let builder = default_builder("DONE");
+        let builder = default_builder();
         let hat = Hat::new("reviewer", "Code Reviewer")
             .with_instructions("Review PRs for quality and correctness.");
 
@@ -266,7 +260,7 @@ mod tests {
             guardrails: vec!["Custom rule one".to_string(), "Custom rule two".to_string()],
             workspace_root: std::path::PathBuf::from("."),
         };
-        let builder = InstructionBuilder::new("DONE", custom_core);
+        let builder = InstructionBuilder::new(custom_core);
 
         let hat = Hat::new("worker", "Worker").with_instructions("Do the work.");
         let instructions = builder.build_custom_hat(&hat, "context");
@@ -280,7 +274,7 @@ mod tests {
     fn test_must_publish_injected_for_explicit_instructions() {
         use ralph_proto::Topic;
 
-        let builder = default_builder("DONE");
+        let builder = default_builder();
         let hat = Hat::new("reviewer", "Code Reviewer")
             .with_instructions("Review PRs for quality and correctness.")
             .with_publishes(vec![
@@ -302,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_must_publish_not_injected_when_no_publishes() {
-        let builder = default_builder("DONE");
+        let builder = default_builder();
         let hat = Hat::new("observer", "Silent Observer")
             .with_instructions("Observe and log, but do not emit events.");
 
@@ -321,7 +315,7 @@ mod tests {
     fn test_derived_behaviors_when_no_explicit_instructions() {
         use ralph_proto::Topic;
 
-        let builder = default_builder("DONE");
+        let builder = default_builder();
         let hat = Hat::new("builder", "Builder")
             .subscribe("build.task")
             .with_publishes(vec![Topic::new("build.done"), Topic::new("build.blocked")]);

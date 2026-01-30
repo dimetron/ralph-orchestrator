@@ -181,11 +181,8 @@ impl EventLoop {
         diagnostics: crate::diagnostics::DiagnosticsCollector,
     ) -> Self {
         let registry = HatRegistry::from_config(&config);
-        let instruction_builder = InstructionBuilder::with_events(
-            &config.event_loop.completion_promise,
-            config.core.clone(),
-            config.events.clone(),
-        );
+        let instruction_builder =
+            InstructionBuilder::with_events(config.core.clone(), config.events.clone());
 
         let mut bus = EventBus::new();
 
@@ -281,11 +278,8 @@ impl EventLoop {
         diagnostics: crate::diagnostics::DiagnosticsCollector,
     ) -> Self {
         let registry = HatRegistry::from_config(&config);
-        let instruction_builder = InstructionBuilder::with_events(
-            &config.event_loop.completion_promise,
-            config.core.clone(),
-            config.events.clone(),
-        );
+        let instruction_builder =
+            InstructionBuilder::with_events(config.core.clone(), config.events.clone());
 
         let mut bus = EventBus::new();
 
