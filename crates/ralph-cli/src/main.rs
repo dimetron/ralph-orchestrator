@@ -2207,7 +2207,7 @@ fn list_directory_contents(path: &Path, use_colors: bool, indent: usize) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{CwdGuard, safe_current_dir};
+    use crate::test_support::CwdGuard;
     use std::path::PathBuf;
 
     #[test]
@@ -2764,6 +2764,7 @@ core:
     #[test]
     fn test_load_config_with_overrides_applies_override_sources() {
         let temp_dir = tempfile::tempdir().unwrap();
+        let _cwd = CwdGuard::set(temp_dir.path());
         let config_path = temp_dir.path().join("ralph.yml");
         std::fs::write(&config_path, "core:\n  scratchpad: .agent/scratchpad.md\n").unwrap();
 
@@ -2778,7 +2779,11 @@ core:
         let config = load_config_with_overrides(&sources).unwrap();
 
         assert_eq!(config.core.scratchpad, ".custom/scratch.md");
-        assert_eq!(config.core.workspace_root, safe_current_dir());
+        let expected_root = std::fs::canonicalize(temp_dir.path())
+            .unwrap_or_else(|_| temp_dir.path().to_path_buf());
+        let actual_root = std::fs::canonicalize(&config.core.workspace_root)
+            .unwrap_or_else(|_| config.core.workspace_root.clone());
+        assert_eq!(actual_root, expected_root);
     }
 
     #[test]
