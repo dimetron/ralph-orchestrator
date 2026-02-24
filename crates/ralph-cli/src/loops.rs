@@ -20,7 +20,10 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use ralph_core::worktree::{list_ralph_worktrees, remove_worktree};
-use ralph_core::{LoopRegistry, MergeButtonState, MergeQueue, MergeState, merge_button_state};
+use ralph_core::{
+    LoopRegistry, MergeButtonState, MergeQueue, MergeState, merge_button_state,
+    truncate_with_ellipsis,
+};
 
 /// Manage parallel loops.
 #[derive(Parser, Debug)]
@@ -500,21 +503,7 @@ fn colorize_status(status: &str) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    // Use character count instead of byte count for UTF-8 safety
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        // Find the byte index of the max-th character for safe slicing
-        if max < 3 {
-            return "...".to_string();
-        }
-        let byte_idx = s
-            .char_indices()
-            .nth(max - 3)
-            .map(|(idx, _)| idx)
-            .unwrap_or(s.len());
-        format!("{}...", &s[..byte_idx])
-    }
+    truncate_with_ellipsis(s, max)
 }
 
 fn shorten_path(path: &str) -> String {
@@ -824,23 +813,24 @@ fn show_diff(args: DiffArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
     let (loop_id, _worktree_path) = resolve_loop(&cwd, &args.loop_id)?;
 
-    // Find the branch
     let branch = format!("ralph/{}", loop_id);
 
-    // Check if branch exists
-    let output = Command::new("git")
-        .args(["rev-parse", "--verify", &branch])
-        .current_dir(&cwd)
-        .output()
-        .context("Failed to run git")?;
-
-    if !output.status.success() {
+    // Check that branch exists.
+    if !git_ref_exists(&cwd, &branch) {
         bail!("Branch '{}' not found", branch);
     }
 
-    // Show diff from merge-base
-    // Note: three-dot syntax requires both refs in a single argument: "main...branch"
-    let diff_range = format!("main...{}", branch);
+    let base_branch = default_diff_base_branch(&cwd);
+    if !git_ref_exists(&cwd, &base_branch) {
+        bail!(
+            "Base branch '{}' not found in this repository.\n\nTry explicitly passing a base via upstream/main merge history.",
+            base_branch
+        );
+    }
+
+    // Show diff from base branch to loop branch.
+    // Note: three-dot syntax requires both refs in a single argument: "base...branch"
+    let diff_range = format!("{}...{}", base_branch, branch);
     let mut git_args = vec!["diff", &diff_range];
 
     if args.stat {
@@ -858,6 +848,55 @@ fn show_diff(args: DiffArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn default_diff_base_branch(cwd: &std::path::Path) -> String {
+    if let Some(output) = git_output(
+        cwd,
+        ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"],
+    ) {
+        let value = output.trim();
+        if let Some(base) = value.split('/').next_back() {
+            let direct = base.to_string();
+            let with_remote = format!("origin/{}", direct);
+            if git_ref_exists(cwd, &direct) {
+                return direct;
+            }
+            if git_ref_exists(cwd, &with_remote) {
+                return with_remote;
+            }
+        }
+    }
+
+    for candidate in ["origin/main", "main", "origin/master", "master"] {
+        if git_ref_exists(cwd, candidate) {
+            return candidate.to_string();
+        }
+    }
+
+    "main".to_string()
+}
+
+fn git_ref_exists(cwd: &std::path::Path, reference: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", reference])
+        .current_dir(cwd)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn git_output(cwd: &std::path::Path, args: [&str; 4]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        None
+    }
 }
 
 /// Merge a completed loop (or force retry).
@@ -934,11 +973,22 @@ fn merge_loop(args: MergeArgs) -> Result<()> {
 
 /// Helper to spawn merge-ralph
 fn spawn_merge_ralph(cwd: &std::path::Path, loop_id: &str) -> Result<()> {
-    // Get the merge-loop preset and write to config file
+    // Get the merge-loop preset and write a core-only config file.
     let preset = crate::presets::get_preset("merge-loop").context("merge-loop preset not found")?;
 
+    let mut core_value: serde_yaml::Value =
+        serde_yaml::from_str(preset.content).context("Failed to parse merge-loop preset YAML")?;
+    if let Some(mapping) = core_value.as_mapping_mut() {
+        let hats_key = serde_yaml::Value::String("hats".to_string());
+        let events_key = serde_yaml::Value::String("events".to_string());
+        mapping.remove(&hats_key);
+        mapping.remove(&events_key);
+    }
+    let core_yaml = serde_yaml::to_string(&core_value)
+        .context("Failed to serialize core-only merge-loop config")?;
+
     let config_path = cwd.join(".ralph/merge-loop-config.yml");
-    std::fs::write(&config_path, preset.content).context("Failed to write merge config file")?;
+    std::fs::write(&config_path, core_yaml).context("Failed to write merge config file")?;
 
     // Spawn merge-ralph
     println!("Spawning merge-ralph for loop '{}'...", loop_id);
@@ -948,6 +998,8 @@ fn spawn_merge_ralph(cwd: &std::path::Path, loop_id: &str) -> Result<()> {
             "run",
             "-c",
             ".ralph/merge-loop-config.yml",
+            "-H",
+            "builtin:merge-loop",
             "--exclusive",
             "-p",
             &format!("Merge loop {} from branch ralph/{}", loop_id, loop_id),
@@ -1069,7 +1121,7 @@ mod tests {
         assert_eq!(truncate(mixed, 6), mixed);
 
         // Test with max < 3 (edge case)
-        assert_eq!(truncate("hello", 2), "...");
+        assert_eq!(truncate("hello", 2), "he");
     }
 
     #[test]
@@ -1453,6 +1505,64 @@ mod tests {
             err.to_string()
                 .contains("Branch 'ralph/loop-missing-branch' not found")
         );
+    }
+
+    #[test]
+    fn test_default_diff_base_branch_prefers_main_branch() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let _cwd = CwdGuard::set(temp_dir.path());
+
+        Command::new("git")
+            .args(["init", "-b", "main", "-q"])
+            .status()
+            .expect("git init -b main");
+
+        assert_eq!(default_diff_base_branch(temp_dir.path()), "main");
+    }
+
+    #[test]
+    fn test_default_diff_base_branch_falls_back_to_master() {
+        let temp_dir = tempfile::tempdir().expect("temp dir");
+        let _cwd = CwdGuard::set(temp_dir.path());
+
+        Command::new("git")
+            .args(["init", "-b", "master", "-q"])
+            .status()
+            .expect("git init -b master");
+
+        // Seed a commit so branch references are materialized.
+        let _ = Command::new("git")
+            .args(["config", "user.email", "ci@example.com"])
+            .current_dir(temp_dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "CI"])
+            .current_dir(temp_dir.path())
+            .status();
+        let _ = Command::new("sh")
+            .args([
+                "-c",
+                "printf 'init' > README.md && git add README.md && git commit -qm 'init'",
+            ])
+            .current_dir(temp_dir.path())
+            .status();
+
+        // Some environments inject template refs that can create a stale `main` branch.
+        // Ensure we test a clean fallback path.
+        let _ = Command::new("git")
+            .args(["branch", "-D", "-q", "main"])
+            .current_dir(temp_dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["update-ref", "-d", "refs/remotes/origin/main"])
+            .current_dir(temp_dir.path())
+            .status();
+        let _ = Command::new("git")
+            .args(["update-ref", "-d", "refs/remotes/origin/HEAD"])
+            .current_dir(temp_dir.path())
+            .status();
+
+        assert_eq!(default_diff_base_branch(temp_dir.path()), "master");
     }
 
     #[test]

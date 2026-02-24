@@ -840,11 +840,13 @@ pub async fn run_loop_impl(
 
         // Step 1: Get hat backend configuration for the active hat
         // Use display_hat (the active hat) instead of hat_id ("ralph" in multi-hat mode)
-        let hat_backend_opt = event_loop.get_hat_backend(&display_hat);
+        let hat_config_opt = event_loop.registry().get_config(&display_hat);
+        let hat_backend_opt = hat_config_opt.and_then(|c| c.backend.as_ref());
+        let hat_backend_args = hat_config_opt.and_then(|c| c.backend_args.clone());
 
         // Step 2: Resolve effective backend and determine backend name for timeout
         // Note: backend_name_for_timeout is owned String to avoid lifetime issues with hat_backend reference
-        let (effective_backend, backend_name_for_timeout): (CliBackend, String) =
+        let (mut effective_backend, backend_name_for_timeout): (CliBackend, String) =
             match hat_backend_opt {
                 Some(hat_backend) => {
                     // Hat has custom backend configuration
@@ -902,6 +904,11 @@ pub async fn run_loop_impl(
                     (backend.clone(), config.cli.backend.clone())
                 }
             };
+
+        // Step 2.5: Apply custom hat backend args if configured
+        if let Some(args) = hat_backend_args {
+            effective_backend.args.extend(args);
+        }
 
         // Step 3: Get timeout from config based on actual backend being used
         let timeout_secs = config.adapter_settings(&backend_name_for_timeout).timeout;
@@ -1624,9 +1631,38 @@ fn process_pending_merges_with_command(repo_root: &Path, ralph_cmd: &OsStr) {
         }
     };
 
-    // Write the merge config once (shared by all merge loops)
+    // Write a core-only merge config once (shared by all merge loops).
+    let mut core_value: serde_yaml::Value = match serde_yaml::from_str(preset.content) {
+        Ok(value) => value,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to parse merge-loop preset, pending merges will remain queued"
+            );
+            return;
+        }
+    };
+
+    if let Some(mapping) = core_value.as_mapping_mut() {
+        let hats_key = serde_yaml::Value::String("hats".to_string());
+        let events_key = serde_yaml::Value::String("events".to_string());
+        mapping.remove(&hats_key);
+        mapping.remove(&events_key);
+    }
+
+    let core_yaml = match serde_yaml::to_string(&core_value) {
+        Ok(yaml) => yaml,
+        Err(e) => {
+            warn!(
+                error = %e,
+                "Failed to serialize core-only merge config, pending merges will remain queued"
+            );
+            return;
+        }
+    };
+
     let config_path = repo_root.join(".ralph/merge-loop-config.yml");
-    if let Err(e) = fs::write(&config_path, preset.content) {
+    if let Err(e) = fs::write(&config_path, core_yaml) {
         warn!(
             error = %e,
             "Failed to write merge config, pending merges will remain queued"
@@ -1646,6 +1682,8 @@ fn process_pending_merges_with_command(repo_root: &Path, ralph_cmd: &OsStr) {
                 "run",
                 "-c",
                 ".ralph/merge-loop-config.yml",
+                "-H",
+                "builtin:merge-loop",
                 "--exclusive",
                 "--no-tui",
                 "-p",
