@@ -536,10 +536,9 @@ fn collect_live_events(
                 dropped_count = dropped_count.saturating_add(skipped as usize);
                 break;
             }
-            Err(
-                broadcast::error::TryRecvError::Empty
-                | broadcast::error::TryRecvError::Closed,
-            ) => break,
+            Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
+                break;
+            }
         }
     }
 
