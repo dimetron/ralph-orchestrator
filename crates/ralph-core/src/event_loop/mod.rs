@@ -486,12 +486,18 @@ impl EventLoop {
             return Some(TerminationReason::ValidationFailure);
         }
 
-        // Check for stale loop: same topic emitted 3+ times in a row
-        if self.state.consecutive_same_topic >= 3 {
+        // Check for stale loop: same event signature emitted 3+ times in a row
+        if self.state.consecutive_same_signature >= 3 {
+            let topic = self
+                .state
+                .last_emitted_signature
+                .as_ref()
+                .map(|signature| signature.topic.as_str())
+                .unwrap_or("?");
             warn!(
-                topic = self.state.last_emitted_topic.as_deref().unwrap_or("?"),
-                count = self.state.consecutive_same_topic,
-                "Stale loop detected: same topic emitted consecutively"
+                topic,
+                count = self.state.consecutive_same_signature,
+                "Stale loop detected: same event signature emitted consecutively"
             );
             return Some(TerminationReason::LoopStale);
         }
@@ -1538,7 +1544,7 @@ impl EventLoop {
                 "No events written by hat, injecting default_publishes event"
             );
 
-            self.state.record_topic(default_topic.as_str());
+            self.state.record_event(&default_event);
 
             // If the default topic is the completion promise, set the flag directly.
             // The normal path (process_events_from_jsonl) sets this when reading from
@@ -2422,7 +2428,7 @@ impl EventLoop {
         // Ralph handles them as the universal fallback.
         for event in validated_events {
             // Record topic for event chain validation
-            self.state.record_topic(event.topic.as_str());
+            self.state.record_event(&event);
 
             self.diagnostics.log_orchestration(
                 self.state.iteration,
@@ -2445,7 +2451,7 @@ impl EventLoop {
 
         // Publish human.response event if one was received during blocking
         if let Some(response) = response_event {
-            self.state.record_topic(response.topic.as_str());
+            self.state.record_event(&response);
             info!(
                 topic = %response.topic,
                 "Publishing human.response event from robot service"

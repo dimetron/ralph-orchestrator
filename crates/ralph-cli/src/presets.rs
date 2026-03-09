@@ -310,7 +310,10 @@ mod tests {
 
         assert_eq!(
             config.event_loop.required_events,
-            vec!["review.section".to_string(), "analysis.complete".to_string()]
+            vec![
+                "review.section".to_string(),
+                "analysis.complete".to_string()
+            ]
         );
 
         let reviewer = config
@@ -326,12 +329,22 @@ mod tests {
             vec!["review.section".to_string(), "REVIEW_COMPLETE".to_string()]
         );
         assert!(reviewer.instructions.contains("On `review.start`:"));
-        assert!(reviewer.instructions.contains("Emit exactly one `review.section`"));
+        assert!(
+            reviewer
+                .instructions
+                .contains("Emit exactly one `review.section`")
+        );
         assert!(reviewer.instructions.contains("On `analysis.complete`:"));
-        assert!(reviewer.instructions.contains("Emit exactly one `REVIEW_COMPLETE`"));
-        assert!(reviewer
-            .instructions
-            .contains("❌ Emit `REVIEW_COMPLETE` on the initial `review.start` pass"));
+        assert!(
+            reviewer
+                .instructions
+                .contains("Emit exactly one `REVIEW_COMPLETE`")
+        );
+        assert!(
+            reviewer
+                .instructions
+                .contains("❌ Emit `REVIEW_COMPLETE` on the initial `review.start` pass")
+        );
 
         let analyzer = config
             .hats
@@ -340,12 +353,16 @@ mod tests {
         assert_eq!(analyzer.triggers, vec!["review.section".to_string()]);
         assert_eq!(analyzer.publishes, vec!["analysis.complete".to_string()]);
         assert_eq!(analyzer.default_publishes, None);
-        assert!(analyzer
-            .instructions
-            .contains("Emit exactly one `analysis.complete`"));
-        assert!(analyzer
-            .instructions
-            .contains("adversarial or failure-path case"));
+        assert!(
+            analyzer
+                .instructions
+                .contains("Emit exactly one `analysis.complete`")
+        );
+        assert!(
+            analyzer
+                .instructions
+                .contains("adversarial or failure-path case")
+        );
     }
 
     #[test]
@@ -385,37 +402,53 @@ mod tests {
                 "DEBUG_COMPLETE".to_string(),
             ]
         );
-        assert!(investigator
-            .instructions
-            .contains("On `debug.start` or `hypothesis.rejected`:"));
+        assert!(
+            investigator
+                .instructions
+                .contains("On `debug.start` or `hypothesis.rejected`:")
+        );
         assert!(investigator
             .instructions
             .contains("If the bug is already fixed, cannot be reproduced, or an existing debug note already captures the answer"));
-        assert!(investigator
-            .instructions
-            .contains("Emit exactly one `hypothesis.test`"));
-        assert!(investigator
-            .instructions
-            .contains("On `hypothesis.confirmed`:"));
-        assert!(investigator
-            .instructions
-            .contains("Emit exactly one `fix.propose`"));
+        assert!(
+            investigator
+                .instructions
+                .contains("Emit exactly one `hypothesis.test`")
+        );
+        assert!(
+            investigator
+                .instructions
+                .contains("On `hypothesis.confirmed`:")
+        );
+        assert!(
+            investigator
+                .instructions
+                .contains("emit `fix.propose`")
+        );
         assert!(investigator.instructions.contains("On `fix.verified`:"));
-        assert!(investigator
-            .instructions
-            .contains("Emit exactly one `DEBUG_COMPLETE`"));
-        assert!(investigator
-            .instructions
-            .contains("Do not end the turn with only prose"));
-        assert!(investigator
-            .instructions
-            .contains("❌ End the turn with only narration, document updates, or \"already complete\""));
-        assert!(investigator
-            .instructions
-            .contains("❌ Emit undeclared topics like `debug.start`"));
-        assert!(investigator
-            .instructions
-            .contains("❌ Skip the event chain by doing fix or verification work inline"));
+        assert!(
+            investigator
+                .instructions
+                .contains("Emit exactly one `DEBUG_COMPLETE`")
+        );
+        assert!(
+            investigator
+                .instructions
+                .contains("Do not end the turn with only prose")
+        );
+        assert!(investigator.instructions.contains(
+            "❌ End the turn with only narration, document updates, or \"already complete\""
+        ));
+        assert!(
+            investigator
+                .instructions
+                .contains("❌ Emit undeclared topics like `debug.start`")
+        );
+        assert!(
+            investigator
+                .instructions
+                .contains("❌ Skip the event chain by doing fix or verification work inline")
+        );
 
         let tester = config.hats.get("tester").expect("tester hat should exist");
         assert_eq!(tester.triggers, vec!["hypothesis.test".to_string()]);
@@ -426,12 +459,16 @@ mod tests {
                 "hypothesis.rejected".to_string(),
             ]
         );
-        assert!(tester
-            .instructions
-            .contains("If the hypothesis says the bug is already fixed"));
-        assert!(tester
-            .instructions
-            .contains("nearby adversarial or neighboring failure-path case"));
+        assert!(
+            tester
+                .instructions
+                .contains("If the hypothesis says the bug is already fixed")
+        );
+        assert!(
+            tester
+                .instructions
+                .contains("nearby adversarial or neighboring failure-path case")
+        );
 
         let fixer = config.hats.get("fixer").expect("fixer hat should exist");
         assert_eq!(
@@ -440,7 +477,11 @@ mod tests {
         );
         assert_eq!(fixer.default_publishes.as_deref(), Some("fix.blocked"));
         assert!(!fixer.instructions.contains("Commit"));
-        assert!(fixer.instructions.contains("❌ Make commits in this preset"));
+        assert!(
+            fixer
+                .instructions
+                .contains("❌ Make commits in this preset")
+        );
 
         let verifier = config
             .hats
@@ -451,8 +492,10 @@ mod tests {
             vec!["fix.verified".to_string(), "fix.failed".to_string()]
         );
         assert_eq!(verifier.default_publishes.as_deref(), Some("fix.failed"));
-        assert!(verifier
-            .instructions
-            .contains("Re-run at least one nearby adversarial or failure-path case."));
+        assert!(
+            verifier
+                .instructions
+                .contains("Re-run at least one nearby adversarial or failure-path case.")
+        );
     }
 }
